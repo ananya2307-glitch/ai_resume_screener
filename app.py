@@ -25,6 +25,7 @@ def upload_file():
         file.save(file_path)
         
         try:
+            # Safely handle PDF vs Text file extraction rules
             if file.filename.lower().endswith('.pdf'):
                 reader = pypdf.PdfReader(file_path)
                 text_content = ""
@@ -37,6 +38,7 @@ def upload_file():
             if not text_content.strip():
                 return jsonify({"error": "The uploaded file appears to be empty or unreadable."}), 400
                 
+            # Maps to the correctly imported name from rag_backend
             index_resume_text(text_content, file.filename)
             return jsonify({"message": f"Successfully indexed {file.filename}!"})
             
@@ -52,6 +54,7 @@ def query_bot():
         return jsonify({"answer": "Please ask a valid question!"}), 400
         
     try:
+        # Maps to the correctly imported name from rag_backend
         ai_answer = query_resume_rag(user_question)
         return jsonify({"answer": ai_answer})
     except Exception as e:
