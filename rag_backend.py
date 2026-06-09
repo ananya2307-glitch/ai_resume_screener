@@ -34,9 +34,10 @@ class DirectHuggingFaceEmbeddings:
 
 
 def index_resume_text(text_content, filename):
-    """Slices text and logs it directly into an In-Memory Chroma instance with telemetry disabled."""
+    """Slices text and logs it directly into an Ephemeral In-Memory Client with hard-disabled telemetry."""
     global GLOBAL_VECTORSTORE
     from langchain_community.vectorstores import Chroma
+    import chromadb
     from chromadb.config import Settings
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
@@ -44,13 +45,14 @@ def index_resume_text(text_content, filename):
     
     embeddings = DirectHuggingFaceEmbeddings()
     
-    # FIX: Explicitly disable Chroma telemetry to bypass the internal argument crash
-    chroma_settings = Settings(anonymized_telemetry=False)
+    # 1. Initialize a raw native Chroma client with telemetry fully killed
+    raw_client = chromadb.Client(Settings(anonymized_telemetry=False))
     
+    # 2. Force Langchain to use this safe client instance directly
     GLOBAL_VECTORSTORE = Chroma.from_documents(
         documents=docs, 
         embedding=embeddings,
-        client_settings=chroma_settings
+        client=raw_client
     )
     return GLOBAL_VECTORSTORE
 
