@@ -6,15 +6,19 @@ from langchain_core.messages import HumanMessage, SystemMessage
 DB_DIR = os.path.join("data", "chroma_db")
 
 def get_embeddings_instance():
-    """Helper to initialize embeddings strictly on demand to minimize active RAM usage."""
-    from langchain_huggingface import HuggingFaceEmbeddings
-    return HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'}
+    """Uses Hugging Face's free hosted Inference API instead of running math locally."""
+    from langchain_huggingface import HuggingFaceInferenceAPIEmbeddings
+    
+    # Securely pulls the token you already saved in Render's environment settings
+    hf_token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+    
+    return HuggingFaceInferenceAPIEmbeddings(
+        api_key=hf_token,
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
 def index_resume_text(text_content, filename):
-    """Slices text content and logs it into a local Chroma vector database."""
+    """Slices text content and logs it into a local Chroma vector database via API embeddings."""
     from langchain_community.vectorstores import Chroma
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
@@ -25,8 +29,7 @@ def index_resume_text(text_content, filename):
     vectorstore = Chroma.from_documents(
         documents=docs, 
         embedding=embeddings, 
-        persist_directory=DB_DIR,
-        client_settings=None # Forces clean low-overhead initialization
+        persist_directory=DB_DIR
     )
     return vectorstore
 
@@ -47,7 +50,6 @@ def query_resume_rag(user_question):
     context = "\n\n".join([doc.page_content for doc in docs])
     
     # 2. Configure a native conversational endpoint model (Llama 3) via API
-    # Note: Ensure you add HUGGINGFACEHUB_API_TOKEN into Render Environment Variables!
     llm = HuggingFaceEndpoint(
         repo_id="meta-llama/Meta-Llama-3-8B-Instruct",
         temperature=0.1,
