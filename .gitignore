@@ -1,0 +1,14 @@
+# Virtual Environment
+.venv/
+venv/
+ENV/
+__pycache__/
+*.pyc
+
+# Local Chroma Vector DB storage
+chroma_db/
+chroma.sqlite3
+data/
+
+# Environment configurations
+.env
