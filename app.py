@@ -1,59 +1,63 @@
 import os
+import pypdf
 from flask import Flask, render_template, request, jsonify
-from rag_backend import process_resume, query_resume
+from rag_backend import index_resume_text, query_resume_rag
 
 app = Flask(__name__)
-
-# Configuration for file uploads
-UPLOAD_FOLDER = './tmp'
+UPLOAD_FOLDER = "data"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Global variable to hold our vector store
-current_vector_store = None
-
-@app.route('/')
+@app.route("/")
 def home():
-    # This serves your index.html from the /templates folder
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/upload', methods=['POST'])
+@app.route("/upload", methods=["POST"])
 def upload_file():
-    global current_vector_store
-    if 'file' not in request.files:
-        return jsonify({"error": "No file part"}), 400
-        
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+    
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
         
     if file:
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(file_path)
         
         try:
-            current_vector_store = process_resume(file_path)
-            return jsonify({"message": f"Successfully processed {file.filename}!"}), 200
+            if file.filename.lower().endswith('.pdf'):
+                reader = pypdf.PdfReader(file_path)
+                text_content = ""
+                for page in reader.pages:
+                    text_content += page.extract_text() or ""
+            else:
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    text_content = f.read()
+            
+            if not text_content.strip():
+                return jsonify({"error": "The uploaded file appears to be empty or unreadable."}), 400
+                
+            index_resume_text(text_content, file.filename)
+            return jsonify({"message": f"Successfully indexed {file.filename}!"})
+            
         except Exception as e:
-            return jsonify({"error": f"Processing failed: {str(e)}"}), 500
+            return jsonify({"error": f"Failed to process file: {str(e)}"}), 500
 
-@app.route('/query', methods=['POST'])
-def ask_question():
-    global current_vector_store
+@app.route("/query", methods=["POST"])
+def query_bot():
     data = request.json
-    question = data.get('question')
+    user_question = data.get("question")
     
-    if not question:
-        return jsonify({"error": "No question provided"}), 400
-        
-    if current_vector_store is None:
-        return jsonify({"error": "Please upload a resume first"}), 400
+    if not user_question:
+        return jsonify({"answer": "Please ask a valid question!"}), 400
         
     try:
-        answer = query_resume(current_vector_store, question)
-        return jsonify({"context": answer}), 200
+        ai_answer = query_resume_rag(user_question)
+        return jsonify({"answer": ai_answer})
     except Exception as e:
-        return jsonify({"error": f"Query failed: {str(e)}"}), 500
+        return jsonify({"answer": f"Error running AI model backend: {str(e)}"}), 500
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=1000)
+if __name__ == "__main__":
+    # Pull dynamic port assigned by Render environment, default locally to 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
