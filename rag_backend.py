@@ -1,8 +1,7 @@
 import os
 import requests
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.messages import HumanMessage, SystemMessage
 
+# Track our database instance globally across requests
 GLOBAL_VECTORSTORE = None
 
 class DirectHuggingFaceEmbeddings:
@@ -36,6 +35,9 @@ class DirectHuggingFaceEmbeddings:
 def index_resume_text(text_content, filename):
     """Slices text and logs it directly into an Ephemeral In-Memory Client with hard-disabled telemetry."""
     global GLOBAL_VECTORSTORE
+    
+    # HEAVY IMPORTS MOVED INSIDE: This keeps startup lightning fast
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
     from langchain_community.vectorstores import Chroma
     import chromadb
     from chromadb.config import Settings
@@ -45,10 +47,10 @@ def index_resume_text(text_content, filename):
     
     embeddings = DirectHuggingFaceEmbeddings()
     
-    # 1. Initialize a raw native Chroma client with telemetry fully killed
+    # Initialize a raw native Chroma client with telemetry fully killed
     raw_client = chromadb.Client(Settings(anonymized_telemetry=False))
     
-    # 2. Force Langchain to use this safe client instance directly
+    # Force Langchain to use this safe client instance directly
     GLOBAL_VECTORSTORE = Chroma.from_documents(
         documents=docs, 
         embedding=embeddings,
@@ -60,7 +62,10 @@ def index_resume_text(text_content, filename):
 def query_resume_rag(user_question):
     """Queries the globally tracked in-memory database instance instantly."""
     global GLOBAL_VECTORSTORE
+    
+    # HEAVY IMPORTS MOVED INSIDE: Only loads when a user actually submits a question
     from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+    from langchain_core.messages import HumanMessage, SystemMessage
     
     if GLOBAL_VECTORSTORE is None:
         return "Please upload and index a resume first!"
