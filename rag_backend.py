@@ -1,95 +1,147 @@
 import os
-import requests
 
-# Track our database instance globally across requests
-GLOBAL_VECTORSTORE = None
+from chromadb import PersistentClient
+from sentence_transformers import SentenceTransformer
+from groq import Groq
 
-class DirectHuggingFaceEmbeddings:
-    """Manually routes vector extraction directly through a standard web request pipeline."""
-    def __init__(self):
-        self.token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
-        self.api_url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
-        self.headers = {"Authorization": f"Bearer {self.token}"}
 
-    def embed_documents(self, texts):
-        response = requests.post(
-            self.api_url, 
-            headers=self.headers, 
-            json={"inputs": texts, "options": {"wait_for_model": True}}
-        )
-        if response.status_code != 200:
-            raise Exception(f"Hugging Face API Error: {response.text}")
-        return response.json()
+# =========================
+# CHROMA DATABASE
+# =========================
 
-    def embed_query(self, text):
-        response = requests.post(
-            self.api_url, 
-            headers=self.headers, 
-            json={"inputs": [text], "options": {"wait_for_model": True}}
-        )
-        if response.status_code != 200:
-            raise Exception(f"Hugging Face API Error: {response.text}")
-        return response.json()[0]
+CHROMA_PATH = "chroma_db"
 
+client_db = PersistentClient(path=CHROMA_PATH)
+
+collection = client_db.get_or_create_collection(
+    name="resume_collection"
+)
+
+
+# =========================
+# EMBEDDING MODEL
+# =========================
+
+embedding_model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+
+
+# =========================
+# INDEX RESUME
+# =========================
 
 def index_resume_text(text_content, filename):
-    """Slices text and logs it directly into an Ephemeral In-Memory Client with hard-disabled telemetry."""
-    global GLOBAL_VECTORSTORE
-    
-    # HEAVY IMPORTS MOVED INSIDE: This keeps startup lightning fast
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-    from langchain_community.vectorstores import Chroma
-    import chromadb
-    from chromadb.config import Settings
-    
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    docs = text_splitter.create_documents(texts=[text_content], metadatas=[{"source": filename}])
-    
-    embeddings = DirectHuggingFaceEmbeddings()
-    
-    # Initialize a raw native Chroma client with telemetry fully killed
-    raw_client = chromadb.Client(Settings(anonymized_telemetry=False))
-    
-    # Force Langchain to use this safe client instance directly
-    GLOBAL_VECTORSTORE = Chroma.from_documents(
-        documents=docs, 
-        embedding=embeddings,
-        client=raw_client
-    )
-    return GLOBAL_VECTORSTORE
 
+    chunks = []
+
+    chunk_size = 500
+    overlap = 100
+
+    start = 0
+
+    while start < len(text_content):
+
+        end = start + chunk_size
+
+        chunks.append(
+            text_content[start:end]
+        )
+
+        start += chunk_size - overlap
+
+    embeddings = embedding_model.encode(
+        chunks
+    ).tolist()
+
+    ids = [
+        f"{filename}_{i}"
+        for i in range(len(chunks))
+    ]
+
+    try:
+
+        collection.add(
+            ids=ids,
+            documents=chunks,
+            embeddings=embeddings,
+            metadatas=[
+                {"source": filename}
+                for _ in chunks
+            ]
+        )
+
+    except Exception:
+        pass
+
+    return True
+
+
+# =========================
+# QUERY RAG
+# =========================
 
 def query_resume_rag(user_question):
-    """Queries the globally tracked in-memory database instance instantly."""
-    global GLOBAL_VECTORSTORE
-    
-    # HEAVY IMPORTS MOVED INSIDE: Only loads when a user actually submits a question
-    from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
-    from langchain_core.messages import HumanMessage, SystemMessage
-    
-    if GLOBAL_VECTORSTORE is None:
-        return "Please upload and index a resume first!"
-        
-    retriever = GLOBAL_VECTORSTORE.as_retriever(search_kwargs={"k": 2})
-    
-    # 1. Fetch relevant sections
-    docs = retriever.invoke(user_question)
-    context = "\n\n".join([doc.page_content for doc in docs])
-    
-    # 2. Setup structural conversational LLM pipeline
-    llm = HuggingFaceEndpoint(
-        repo_id="meta-llama/Meta-Llama-3-8B-Instruct",
-        temperature=0.1,
-        max_new_tokens=512,
-        huggingfacehub_api_token=os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+
+    api_key = os.getenv("GROQ_API_KEY")
+
+    if not api_key:
+
+        return (
+            "GROQ_API_KEY is missing. "
+            "Add it inside Render Environment Variables."
+        )
+
+    question_embedding = embedding_model.encode(
+        user_question
+    ).tolist()
+
+    results = collection.query(
+        query_embeddings=[question_embedding],
+        n_results=3
     )
-    
-    chat_model = ChatHuggingFace(llm=llm)
-    
-    messages = [
-        SystemMessage(content=f"You are a helpful HR robot. Answer using only the resume facts given below. If the information is not present, say you cannot find it.\n\nContext:\n{context}"),
-        HumanMessage(content=user_question)
-    ]
-    
-    response = chat_model.invoke(messages)
-    return response.content
+
+    retrieved_docs = results["documents"][0]
+
+    if len(retrieved_docs) == 0:
+
+        return "Please upload a resume first."
+
+    context = "\n\n".join(
+        retrieved_docs
+    )
+
+    client = Groq(
+        api_key=api_key
+    )
+
+    completion = client.chat.completions.create(
+        model="llama3-8b-8192",
+        temperature=0.2,
+        max_tokens=500,
+        messages=[
+            {
+                "role": "system",
+                "content": f"""
+You are an AI Resume Screener.
+
+Answer ONLY from the resume context.
+
+If the answer is not available in the resume,
+say:
+
+'I could not find that information in the resume.'
+
+Resume Context:
+
+{context}
+"""
+            },
+            {
+                "role": "user",
+                "content": user_question
+            }
+        ]
+    )
+
+    return completion.choices[0].message.content

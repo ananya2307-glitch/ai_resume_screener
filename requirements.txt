@@ -1,9 +1,8 @@
 flask==3.0.3
 gunicorn==22.0.0
 pypdf==4.2.0
-langchain==0.2.1
-langchain-community==0.2.1
-langchain-huggingface==0.0.1
 chromadb==0.5.0
 sentence-transformers==3.0.0
-huggingface-hub==0.23.2
+groq==0.28.0
+torch
+numpy
