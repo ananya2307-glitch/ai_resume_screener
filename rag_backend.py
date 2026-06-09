@@ -1,53 +1,72 @@
 import os
+import requests
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.messages import HumanMessage, SystemMessage
 
-# Global in-memory storage variable to hold our database instance across requests
 GLOBAL_VECTORSTORE = None
 
-def get_embeddings_instance():
-    """Uses Hugging Face's hosted community Inference API wrapper for rapid execution."""
-    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-    
-    hf_token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
-    return HuggingFaceInferenceAPIEmbeddings(
-        api_key=hf_token,
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+class DirectHuggingFaceEmbeddings:
+    """Manually routes vector extraction directly through a standard web request pipeline."""
+    def __init__(self):
+        self.token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+        self.api_url = "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+        self.headers = {"Authorization": f"Bearer {self.token}"}
+
+    def embed_documents(self, texts):
+        response = requests.post(
+            self.api_url, 
+            headers=self.headers, 
+            json={"inputs": texts, "options": {"wait_for_model": True}}
+        )
+        if response.status_code != 200:
+            raise Exception(f"Hugging Face API Error: {response.text}")
+        return response.json()
+
+    def embed_query(self, text):
+        response = requests.post(
+            self.api_url, 
+            headers=self.headers, 
+            json={"inputs": [text], "options": {"wait_for_model": True}}
+        )
+        if response.status_code != 200:
+            raise Exception(f"Hugging Face API Error: {response.text}")
+        return response.json()[0]
+
 
 def index_resume_text(text_content, filename):
-    """Slices text and builds an instant In-Memory Chroma DB, completely avoiding disk lag."""
+    """Slices text and logs it directly into a lightweight In-Memory vector framework."""
     global GLOBAL_VECTORSTORE
     from langchain_community.vectorstores import Chroma
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     docs = text_splitter.create_documents(texts=[text_content], metadatas=[{"source": filename}])
     
-    embeddings = get_embeddings_instance()
+    # Use our custom direct network router
+    embeddings = DirectHuggingFaceEmbeddings()
     
-    # FIX: Initialize Chroma purely in-memory (no persist_directory argument)
     GLOBAL_VECTORSTORE = Chroma.from_documents(
         documents=docs, 
         embedding=embeddings
     )
     return GLOBAL_VECTORSTORE
 
+
 def query_resume_rag(user_question):
-    """Queries the globally held in-memory database instance instantly."""
+    """Queries the globally tracked database instance instantly."""
     global GLOBAL_VECTORSTORE
     from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
     
-    # Check if a file has been processed in memory yet
     if GLOBAL_VECTORSTORE is None:
         return "Please upload and index a resume first!"
         
+    embeddings = DirectHuggingFaceEmbeddings()
     retriever = GLOBAL_VECTORSTORE.as_retriever(search_kwargs={"k": 2})
     
-    # 1. Fetch relevant sections from memory
+    # 1. Fetch data match contexts
     docs = retriever.invoke(user_question)
     context = "\n\n".join([doc.page_content for doc in docs])
     
-    # 2. Configure conversational Llama 3 via API
+    # 2. Setup structural conversational LLM pipeline
     llm = HuggingFaceEndpoint(
         repo_id="meta-llama/Meta-Llama-3-8B-Instruct",
         temperature=0.1,
