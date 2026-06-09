@@ -1,6 +1,6 @@
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpoint, ChatHuggingFace
+from langchain_huggingface import HuggingFaceInferenceEmbeddings, HuggingFaceEndpoint, ChatHuggingFace
 from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -8,8 +8,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 DB_DIR = os.path.join("data", "chroma_db")
 
 # Initialize the embedding model locally
-embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-
+embeddings = HuggingFaceInferenceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
 def index_resume_text(text_content, filename):
     """Slices text content and logs it into a local Chroma vector database."""
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
