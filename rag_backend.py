@@ -34,35 +34,38 @@ class DirectHuggingFaceEmbeddings:
 
 
 def index_resume_text(text_content, filename):
-    """Slices text and logs it directly into a lightweight In-Memory vector framework."""
+    """Slices text and logs it directly into an In-Memory Chroma instance with telemetry disabled."""
     global GLOBAL_VECTORSTORE
     from langchain_community.vectorstores import Chroma
+    from chromadb.config import Settings
     
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
     docs = text_splitter.create_documents(texts=[text_content], metadatas=[{"source": filename}])
     
-    # Use our custom direct network router
     embeddings = DirectHuggingFaceEmbeddings()
+    
+    # FIX: Explicitly disable Chroma telemetry to bypass the internal argument crash
+    chroma_settings = Settings(anonymized_telemetry=False)
     
     GLOBAL_VECTORSTORE = Chroma.from_documents(
         documents=docs, 
-        embedding=embeddings
+        embedding=embeddings,
+        client_settings=chroma_settings
     )
     return GLOBAL_VECTORSTORE
 
 
 def query_resume_rag(user_question):
-    """Queries the globally tracked database instance instantly."""
+    """Queries the globally tracked in-memory database instance instantly."""
     global GLOBAL_VECTORSTORE
     from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
     
     if GLOBAL_VECTORSTORE is None:
         return "Please upload and index a resume first!"
         
-    embeddings = DirectHuggingFaceEmbeddings()
     retriever = GLOBAL_VECTORSTORE.as_retriever(search_kwargs={"k": 2})
     
-    # 1. Fetch data match contexts
+    # 1. Fetch relevant sections
     docs = retriever.invoke(user_question)
     context = "\n\n".join([doc.page_content for doc in docs])
     
