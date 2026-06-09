@@ -25,7 +25,6 @@ def upload_file():
         file.save(file_path)
         
         try:
-            # Safely handle PDF vs Text file extraction rules
             if file.filename.lower().endswith('.pdf'):
                 reader = pypdf.PdfReader(file_path)
                 text_content = ""
@@ -38,7 +37,7 @@ def upload_file():
             if not text_content.strip():
                 return jsonify({"error": "The uploaded file appears to be empty or unreadable."}), 400
                 
-            # Maps to the correctly imported name from rag_backend
+            # Calling the correct function imported from rag_backend
             index_resume_text(text_content, file.filename)
             return jsonify({"message": f"Successfully indexed {file.filename}!"})
             
@@ -54,13 +53,13 @@ def query_bot():
         return jsonify({"answer": "Please ask a valid question!"}), 400
         
     try:
-        # Maps to the correctly imported name from rag_backend
+        # Calling the correct function imported from rag_backend
         ai_answer = query_resume_rag(user_question)
         return jsonify({"answer": ai_answer})
     except Exception as e:
         return jsonify({"answer": f"Error running AI model backend: {str(e)}"}), 500
 
 if __name__ == "__main__":
-    # Pull dynamic port assigned by Render environment, default locally to 8080
+    # Dynamically find the port assigned by Render, fallback to 8080 locally
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
