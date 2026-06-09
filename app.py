@@ -60,5 +60,7 @@ def query_bot():
     except Exception as e:
         return jsonify({"answer": f"Error running AI model backend: {str(e)}"}), 500
 
-if __name__ == "__main__":
-    app.run(debug=True, port=8080)
+if __name__ == '__main__':
+    # Uses Render's dynamic port in production, or falls back to 8080 on your laptop
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
