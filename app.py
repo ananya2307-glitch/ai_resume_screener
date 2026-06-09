@@ -1,66 +1,53 @@
 import os
-import pypdf
-from flask import Flask, render_template, request, jsonify
-from rag_backend import index_resume_text, query_resume_rag
+from flask import Flask, request, jsonify
+from rag_backend import process_resume, query_resume  # Cleaned to match exact function names
 
 app = Flask(__name__)
-UPLOAD_FOLDER = "data"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-@app.route("/")
+UPLOAD_FOLDER = '/tmp'
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+@app.route('/')
 def home():
-    return render_template("index.html")
+    return jsonify({"status": "healthy", "message": "AI Resume Screener Backend API is Live!"})
 
-@app.route("/upload", methods=["POST"])
+@app.route('/upload', methods=['POST'])
 def upload_file():
-    if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
-    
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"error": "No selected file"}), 400
+    if 'file' not in request.files:
+        return jsonify({"error": "No file chunk found in request"}), 400
+        
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No file selected"}), 400
         
     if file:
-        file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
         
         try:
-            # Safely handle PDF vs Text file extraction rules
-            if file.filename.lower().endswith('.pdf'):
-                reader = pypdf.PdfReader(file_path)
-                text_content = ""
-                for page in reader.pages:
-                    text_content += page.extract_text() or ""
-            else:
-                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                    text_content = f.read()
-            
-            if not text_content.strip():
-                return jsonify({"error": "The uploaded file appears to be empty or unreadable."}), 400
-                
-            # Stream extracted content directly into your Chroma vector storage
-            index_resume_text(text_content, file.filename)
-            return jsonify({"message": f"Successfully indexed {file.filename}!"})
-            
+            global current_vector_store
+            current_vector_store = process_resume(file_path)
+            return jsonify({"message": f"Successfully processed {file.filename}!"}), 200
         except Exception as e:
-            return jsonify({"error": f"Failed to process file: {str(e)}"}), 500
+            return jsonify({"error": f"Processing failed: {str(e)}"}), 500
 
-@app.route("/query", methods=["POST"])
-def query_bot():
+@app.route('/query', methods=['POST'])
+def ask_question():
     data = request.json
-    user_question = data.get("question")
+    question = data.get('question')
     
-    if not user_question:
-        return jsonify({"answer": "Please ask a valid question!"}), 400
+    if not question:
+        return jsonify({"error": "No question string provided"}), 400
         
     try:
-        # Route query through the updated LangChain conversation stream
-        ai_answer = query_resume_rag(user_question)
-        return jsonify({"answer": ai_answer})
+        if 'current_vector_store' not in globals():
+            return jsonify({"error": "Please upload and process a resume profile first"}), 400
+            
+        context_reply = query_resume(current_vector_store, question)
+        return jsonify({"context": context_reply}), 200
     except Exception as e:
-        return jsonify({"answer": f"Error running AI model backend: {str(e)}"}), 500
+        return jsonify({"error": f"Query execution failed: {str(e)}"}), 500
 
+# Hardcoded strictly to 8080 
 if __name__ == '__main__':
-    # Uses Render's dynamic port in production, or falls back to 8080 on your laptop
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=8080)
