@@ -6,15 +6,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 DB_DIR = os.path.join("data", "chroma_db")
 
 def get_embeddings_instance():
-    """Uses Hugging Face's hosted cloud API instead of running heavy math on Render's CPU."""
-    from langchain_huggingface import HuggingFaceEndpointEmbeddings
+    """Uses Hugging Face's stable hosted community Inference API wrapper for speed."""
+    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
     
     # Securely pulls the token you saved in Render's Environment settings
     hf_token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
     
-    return HuggingFaceEndpointEmbeddings(
-        model="sentence-transformers/all-MiniLM-L6-v2",
-        huggingfacehub_api_token=hf_token
+    return HuggingFaceInferenceAPIEmbeddings(
+        api_key=hf_token,
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
 def index_resume_text(text_content, filename):
