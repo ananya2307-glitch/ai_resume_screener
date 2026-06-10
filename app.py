@@ -1,14 +1,23 @@
+from dotenv import load_dotenv
+load_dotenv()
 import os
 import pypdf
 
 from flask import Flask, render_template, request, jsonify
 
-from rag_backend import index_resume_text, query_resume_rag
+from rag_backend import (
+    index_resume_text,
+    query_resume_rag
+)
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "data"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+os.makedirs(
+    UPLOAD_FOLDER,
+    exist_ok=True
+)
 
 
 @app.route("/")
@@ -20,12 +29,16 @@ def home():
 def upload_file():
 
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({
+            "error": "No file uploaded"
+        }), 400
 
     file = request.files["file"]
 
     if file.filename == "":
-        return jsonify({"error": "No file selected"}), 400
+        return jsonify({
+            "error": "No file selected"
+        }), 400
 
     file_path = os.path.join(
         UPLOAD_FOLDER,
@@ -36,17 +49,19 @@ def upload_file():
 
     try:
 
-        # PDF FILE
+        text_content = ""
+
         if file.filename.lower().endswith(".pdf"):
 
-            reader = pypdf.PdfReader(file_path)
-
-            text_content = ""
+            reader = pypdf.PdfReader(
+                file_path
+            )
 
             for page in reader.pages:
-                text_content += page.extract_text() or ""
+                text_content += (
+                    page.extract_text() or ""
+                )
 
-        # TXT FILE
         elif file.filename.lower().endswith(".txt"):
 
             with open(
@@ -59,14 +74,17 @@ def upload_file():
                 text_content = f.read()
 
         else:
+
             return jsonify({
-                "error": "Only PDF and TXT files are supported."
+                "error":
+                "Only PDF and TXT files are supported."
             }), 400
 
         if not text_content.strip():
 
             return jsonify({
-                "error": "The uploaded file contains no readable text."
+                "error":
+                "No readable text found."
             }), 400
 
         index_resume_text(
@@ -75,32 +93,39 @@ def upload_file():
         )
 
         return jsonify({
-            "message": f"{file.filename} indexed successfully!"
+            "message":
+            f"{file.filename} uploaded successfully."
         })
 
     except Exception as e:
 
         return jsonify({
-            "error": f"Failed to process file: {str(e)}"
+            "error": str(e)
         }), 500
 
 
 @app.route("/query", methods=["POST"])
-def query_bot():
+def query():
 
     try:
 
         data = request.get_json()
 
-        question = data.get("question", "").strip()
+        question = data.get(
+            "question",
+            ""
+        ).strip()
 
         if not question:
 
             return jsonify({
-                "answer": "Please enter a valid question."
+                "answer":
+                "Please enter a question."
             }), 400
 
-        answer = query_resume_rag(question)
+        answer = query_resume_rag(
+            question
+        )
 
         return jsonify({
             "answer": answer
@@ -109,18 +134,20 @@ def query_bot():
     except Exception as e:
 
         return jsonify({
-            "answer": f"Error: {str(e)}"
+            "answer": str(e)
         }), 500
 
 
 if __name__ == "__main__":
 
     port = int(
-        os.environ.get("PORT", 8080)
+        os.environ.get(
+            "PORT",
+            8080
+        )
     )
 
     app.run(
         host="0.0.0.0",
-        port=port,
-        debug=False
+        port=port
     )

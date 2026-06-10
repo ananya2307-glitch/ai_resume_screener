@@ -1,147 +1,64 @@
 import os
-
-from chromadb import PersistentClient
-from sentence_transformers import SentenceTransformer
 from groq import Groq
 
+# Stores uploaded resume text in memory
+RESUME_TEXT = ""
 
-# =========================
-# CHROMA DATABASE
-# =========================
-
-CHROMA_PATH = "chroma_db"
-
-client_db = PersistentClient(path=CHROMA_PATH)
-
-collection = client_db.get_or_create_collection(
-    name="resume_collection"
-)
-
-
-# =========================
-# EMBEDDING MODEL
-# =========================
-
-embedding_model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
-
-
-# =========================
-# INDEX RESUME
-# =========================
 
 def index_resume_text(text_content, filename):
+    global RESUME_TEXT
 
-    chunks = []
-
-    chunk_size = 500
-    overlap = 100
-
-    start = 0
-
-    while start < len(text_content):
-
-        end = start + chunk_size
-
-        chunks.append(
-            text_content[start:end]
-        )
-
-        start += chunk_size - overlap
-
-    embeddings = embedding_model.encode(
-        chunks
-    ).tolist()
-
-    ids = [
-        f"{filename}_{i}"
-        for i in range(len(chunks))
-    ]
-
-    try:
-
-        collection.add(
-            ids=ids,
-            documents=chunks,
-            embeddings=embeddings,
-            metadatas=[
-                {"source": filename}
-                for _ in chunks
-            ]
-        )
-
-    except Exception:
-        pass
+    RESUME_TEXT = text_content
 
     return True
 
 
-# =========================
-# QUERY RAG
-# =========================
-
 def query_resume_rag(user_question):
+    global RESUME_TEXT
+
+    if not RESUME_TEXT.strip():
+        return "Please upload a resume first."
 
     api_key = os.getenv("GROQ_API_KEY")
 
     if not api_key:
+        return "GROQ_API_KEY not configured."
 
-        return (
-            "GROQ_API_KEY is missing. "
-            "Add it inside Render Environment Variables."
-        )
+    try:
+        client = Groq(api_key=api_key)
 
-    question_embedding = embedding_model.encode(
-        user_question
-    ).tolist()
+        prompt = f"""
+You are an AI Resume Screening Assistant.
 
-    results = collection.query(
-        query_embeddings=[question_embedding],
-        n_results=3
-    )
+Use ONLY the information present in the resume.
 
-    retrieved_docs = results["documents"][0]
-
-    if len(retrieved_docs) == 0:
-
-        return "Please upload a resume first."
-
-    context = "\n\n".join(
-        retrieved_docs
-    )
-
-    client = Groq(
-        api_key=api_key
-    )
-
-    completion = client.chat.completions.create(
-        model="llama3-8b-8192",
-        temperature=0.2,
-        max_tokens=500,
-        messages=[
-            {
-                "role": "system",
-                "content": f"""
-You are an AI Resume Screener.
-
-Answer ONLY from the resume context.
-
-If the answer is not available in the resume,
-say:
-
+If the answer cannot be found in the resume, respond with:
 'I could not find that information in the resume.'
 
-Resume Context:
+Resume:
+{RESUME_TEXT[:12000]}
 
-{context}
+Question:
+{user_question}
 """
-            },
-            {
-                "role": "user",
-                "content": user_question
-            }
-        ]
-    )
 
-    return completion.choices[0].message.content
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert resume analysis assistant."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,
+            max_tokens=500
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        return f"Error: {str(e)}"
